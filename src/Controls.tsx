@@ -74,6 +74,19 @@ export function Controls({ player, onFile }: { player: Player; onFile: (f: File)
         </button>
       </div>
 
+      <div className="group seg" role="group" aria-label="Hands">
+        {(["left", "both", "right"] as const).map((h) => (
+          <button
+            key={h}
+            className={player.hands === h ? "active" : ""}
+            disabled={!hasScore}
+            onClick={() => player.setHands(h)}
+          >
+            {h === "both" ? "Both hands" : h === "right" ? "Right hand" : "Left hand"}
+          </button>
+        ))}
+      </div>
+
       <div className="group">
         <span>Loop</span>
         <input

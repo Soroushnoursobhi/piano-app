@@ -14,7 +14,10 @@ import * as Tone from "tone";
 type PlayableNote = {
   midi: number;        // MIDI pitch number: 60 = middle C
   durationWhole: number; // length in whole notes (0.25 = a quarter note)
+  staff: number;       // 0 = top staff (right hand), 1 = bottom staff (left hand)
 };
+
+export type Hands = "both" | "right" | "left";
 
 // One position of the cursor. The cursor stops at every distinct time
 // where something starts (a note, a chord, a rest) in any staff.
@@ -53,6 +56,7 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
   const cursorStepRef = useRef(0);       // which step the visual cursor is on now
   const endTicksRef = useRef(0);         // where the piece ends
   const measureStartsRef = useRef<number[]>([]); // start time (whole notes) of each measure
+  const handsRef = useRef<Hands>("both");        // read inside scheduled callbacks, so a ref
 
   // Things the UI shows live in state (changing them re-renders the components).
   const [status, setStatus] = useState<Status>("empty");
@@ -61,6 +65,7 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
   const [bpm, setBpmState] = useState(100);
   const [sheetBpm, setSheetBpm] = useState(100);
   const [loop, setLoopState] = useState<Loop>(null);
+  const [hands, setHandsState] = useState<Hands>("both");
   const [title, setTitle] = useState("");
   const [error, setError] = useState("");
 
@@ -115,12 +120,15 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
       for (const voiceEntry of it.CurrentVoiceEntries) {
         for (const note of voiceEntry.Notes as Note[]) {
           if (note.isRest() || !note.Pitch || note.IsGraceNote) continue;
+          // Which staff the note is printed on. For piano music staff 0 is the
+          // treble (right hand) and staff 1 the bass (left hand).
+          const staff = note.ParentStaffEntry?.ParentStaff?.idInMusicSheet ?? 0;
           const tie = note.NoteTie;
           if (tie) {
             if (tie.StartNote !== note) continue; // continuation of a tie: already sounding
-            notes.push({ midi: note.halfTone + 12, durationWhole: tie.Duration.RealValue });
+            notes.push({ midi: note.halfTone + 12, durationWhole: tie.Duration.RealValue, staff });
           } else {
-            notes.push({ midi: note.halfTone + 12, durationWhole: note.Length.RealValue });
+            notes.push({ midi: note.halfTone + 12, durationWhole: note.Length.RealValue, staff });
           }
         }
       }
@@ -148,7 +156,10 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
         const sampler = samplerRef.current;
         if (sampler && step.notes.length) {
           const secPerWhole = (60 / Tone.getTransport().bpm.value) * 4;
+          const wanted = handsRef.current;
           for (const n of step.notes) {
+            if (wanted === "right" && n.staff !== 0) continue;
+            if (wanted === "left" && n.staff === 0) continue;
             const seconds = Math.max(0.05, n.durationWhole * secPerWhole * 0.95);
             sampler.triggerAttackRelease(Tone.Frequency(n.midi, "midi").toNote(), seconds, time);
           }
@@ -239,6 +250,11 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
     setStatus(stepsRef.current.length ? "ready" : "empty");
   }, [moveCursorTo]);
 
+  const setHands = useCallback((value: Hands) => {
+    handsRef.current = value;
+    setHandsState(value);
+  }, []);
+
   const setBpm = useCallback((value: number) => {
     Tone.getTransport().bpm.value = value;
     setBpmState(value);
@@ -300,7 +316,7 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
   }, []);
 
   return {
-    status, error, title, measureCount, currentMeasure, bpm, sheetBpm, loop,
-    load, play, pause, stop, setBpm, setLoop, jumpToMeasure, measureAtPoint,
+    status, error, title, measureCount, currentMeasure, bpm, sheetBpm, loop, hands,
+    load, play, pause, stop, setBpm, setLoop, setHands, jumpToMeasure, measureAtPoint,
   };
 }

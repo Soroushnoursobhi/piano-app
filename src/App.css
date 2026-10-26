@@ -59,6 +59,11 @@ button.quiet {
   padding-left: 0.3rem;
   padding-right: 0.3rem;
 }
+.seg { gap: 0; }
+.seg button { border-radius: 0; margin-left: -1px; }
+.seg button:first-child { border-radius: 4px 0 0 4px; margin-left: 0; }
+.seg button:last-child { border-radius: 0 4px 4px 0; }
+.seg button.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); position: relative; }
 button.active {
   background: var(--loop);
   border-color: var(--loop);
