@@ -57,6 +57,12 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
   const endTicksRef = useRef(0);         // where the piece ends
   const measureStartsRef = useRef<number[]>([]); // start time (whole notes) of each measure
   const handsRef = useRef<Hands>("both");        // read inside scheduled callbacks, so a ref
+  const loopRef = useRef<Loop>(null);
+  // Wait mode: playback advances only when you play the expected notes.
+  const waitModeRef = useRef(false);
+  const waitActiveRef = useRef(false);           // true while wait-mode playback is running
+  const waitStepRef = useRef(0);                 // the step we are currently waiting on
+  const expectedRef = useRef<Set<number>>(new Set()); // MIDI numbers still to be played
 
   // Things the UI shows live in state (changing them re-renders the components).
   const [status, setStatus] = useState<Status>("empty");
@@ -66,6 +72,8 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
   const [sheetBpm, setSheetBpm] = useState(100);
   const [loop, setLoopState] = useState<Loop>(null);
   const [hands, setHandsState] = useState<Hands>("both");
+  const [waitMode, setWaitModeState] = useState(false);
+  const [expected, setExpected] = useState<number[]>([]); // for the on-screen keyboard
   const [title, setTitle] = useState("");
   const [error, setError] = useState("");
 
@@ -78,6 +86,11 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
       followCursor: true, // OSMD scrolls the page so the cursor stays visible
     });
   }, [containerRef]);
+
+  const isSelectedHand = (n: PlayableNote) => {
+    const h = handsRef.current;
+    return h === "both" || (h === "right" ? n.staff === 0 : n.staff !== 0);
+  };
 
   // ---- cursor helpers ----
   // Move the visual cursor to a given step. Forward = call next() repeatedly;
@@ -156,10 +169,8 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
         const sampler = samplerRef.current;
         if (sampler && step.notes.length) {
           const secPerWhole = (60 / Tone.getTransport().bpm.value) * 4;
-          const wanted = handsRef.current;
           for (const n of step.notes) {
-            if (wanted === "right" && n.staff !== 0) continue;
-            if (wanted === "left" && n.staff === 0) continue;
+            if (!isSelectedHand(n)) continue;
             const seconds = Math.max(0.05, n.durationWhole * secPerWhole * 0.95);
             sampler.triggerAttackRelease(Tone.Frequency(n.midi, "midi").toNote(), seconds, time);
           }
@@ -188,7 +199,11 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
     setStatus("loading");
     setError("");
     setLoopState(null);
+    loopRef.current = null;
     transport.loop = false;
+    waitActiveRef.current = false;
+    expectedRef.current = new Set();
+    setExpected([]);
     try {
       await osmd.load(xml);
       osmd.render();
@@ -229,16 +244,81 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
     await Tone.loaded(); // waits for every sample file to download
   }, []);
 
+  // Play some notes right now (used by wait mode and the on-screen keyboard).
+  const soundNotes = useCallback((notes: PlayableNote[]) => {
+    const sampler = samplerRef.current;
+    if (!sampler) return;
+    const secPerWhole = (60 / Tone.getTransport().bpm.value) * 4;
+    for (const n of notes) {
+      sampler.triggerAttackRelease(Tone.Frequency(n.midi, "midi").toNote(), Math.max(0.1, n.durationWhole * secPerWhole));
+    }
+  }, []);
+
+  // ---- wait mode engine ----
+  // Enter a step: move the cursor there, sound the notes of the muted hand(s),
+  // and wait for the selected hand's notes. Steps with nothing to wait for
+  // (rests, muted-hand-only) are passed through immediately.
+  const enterStep = useCallback((startIndex: number) => {
+    const steps = stepsRef.current;
+    let i = startIndex;
+    for (let guard = 0; guard <= steps.length; guard++) {
+      const loop = loopRef.current;
+      if (loop && (i >= steps.length || steps[i].measureIndex > loop.end)) {
+        i = steps.findIndex((s) => s.measureIndex >= loop.start);
+      }
+      if (i < 0 || i >= steps.length) {
+        // end of piece
+        waitActiveRef.current = false;
+        expectedRef.current = new Set();
+        setExpected([]);
+        setStatus("ready");
+        moveCursorTo(0);
+        return;
+      }
+      const step = steps[i];
+      moveCursorTo(i);
+      soundNotes(step.notes.filter((n) => !isSelectedHand(n)));
+      const wanted = step.notes.filter(isSelectedHand).map((n) => n.midi);
+      if (wanted.length > 0) {
+        waitStepRef.current = i;
+        expectedRef.current = new Set(wanted);
+        setExpected([...new Set(wanted)]);
+        return;
+      }
+      i++;
+    }
+  }, [moveCursorTo, soundNotes]);
+
+  // Called by any input device: on-screen keyboard now, MIDI keyboard later.
+  const noteOn = useCallback(async (midi: number) => {
+    await ensureAudio();
+    samplerRef.current?.triggerAttackRelease(Tone.Frequency(midi, "midi").toNote(), 0.8);
+    if (!waitActiveRef.current) return;
+    const exp = expectedRef.current;
+    if (!exp.has(midi)) return; // wrong note: ignored
+    exp.delete(midi);
+    setExpected([...exp]);
+    if (exp.size === 0) enterStep(waitStepRef.current + 1);
+  }, [ensureAudio, enterStep]);
+
   const play = useCallback(async () => {
     if (stepsRef.current.length === 0) return;
     await ensureAudio();
-    Tone.getTransport().start();
     setStatus("playing");
-  }, [ensureAudio]);
+    if (waitModeRef.current) {
+      waitActiveRef.current = true;
+      enterStep(cursorStepRef.current);
+    } else {
+      Tone.getTransport().start();
+    }
+  }, [ensureAudio, enterStep]);
 
   const pause = useCallback(() => {
     Tone.getTransport().pause();
     samplerRef.current?.releaseAll();
+    waitActiveRef.current = false;
+    expectedRef.current = new Set();
+    setExpected([]);
     setStatus("paused");
   }, []);
 
@@ -246,9 +326,20 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
     const transport = Tone.getTransport();
     transport.stop();
     samplerRef.current?.releaseAll();
+    waitActiveRef.current = false;
+    expectedRef.current = new Set();
+    setExpected([]);
     moveCursorTo(0);
     setStatus(stepsRef.current.length ? "ready" : "empty");
   }, [moveCursorTo]);
+
+  const setWaitMode = useCallback((on: boolean) => {
+    if (waitModeRef.current === on) return;
+    // Switching modes mid-playback: pause first, the user presses Play again.
+    if (Tone.getTransport().state === "started" || waitActiveRef.current) pause();
+    waitModeRef.current = on;
+    setWaitModeState(on);
+  }, [pause]);
 
   const setHands = useCallback((value: Hands) => {
     handsRef.current = value;
@@ -267,8 +358,9 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
     if (stepIndex < 0) return;
     samplerRef.current?.releaseAll();
     Tone.getTransport().position = `${wholeToTicks(steps[stepIndex].timeWhole)}i`;
-    moveCursorTo(stepIndex);
-  }, [moveCursorTo]);
+    if (waitActiveRef.current) enterStep(stepIndex);
+    else moveCursorTo(stepIndex);
+  }, [moveCursorTo, enterStep]);
 
   // Loop a measure range (0-based, inclusive). null = no loop.
   const setLoop = useCallback((range: Loop) => {
@@ -276,6 +368,7 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
     const starts = measureStartsRef.current;
     if (!range || starts.length === 0) {
       transport.loop = false;
+      loopRef.current = null;
       setLoopState(null);
       return;
     }
@@ -286,6 +379,7 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
     transport.loopStart = `${startTicks}i`;
     transport.loopEnd = `${endTicks}i`;
     transport.loop = true;
+    loopRef.current = { start, end };
     setLoopState({ start, end });
     // If we are outside the loop, jump into it.
     const posTicks = transport.ticks;
@@ -316,7 +410,7 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
   }, []);
 
   return {
-    status, error, title, measureCount, currentMeasure, bpm, sheetBpm, loop, hands,
-    load, play, pause, stop, setBpm, setLoop, setHands, jumpToMeasure, measureAtPoint,
+    status, error, title, measureCount, currentMeasure, bpm, sheetBpm, loop, hands, waitMode, expected,
+    load, play, pause, stop, setBpm, setLoop, setHands, setWaitMode, noteOn, jumpToMeasure, measureAtPoint,
   };
 }

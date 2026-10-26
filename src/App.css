@@ -106,3 +106,49 @@ input[type="range"] { width: 140px; accent-color: var(--accent); }
   background: transparent;
   border-color: transparent;
 }
+
+/* ---- on-screen keyboard ---- */
+.keys {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  overflow-x: auto;
+  padding: 0.5rem 1.25rem 0.75rem;
+  background: var(--paper);
+  border-top: 1px solid var(--line);
+}
+.keyboard {
+  position: relative;
+  height: 110px;
+  margin: 0 auto;
+}
+.key {
+  position: absolute;
+  top: 0;
+  padding: 0;
+  margin: 0;
+  border-radius: 0 0 3px 3px;
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+}
+.key.white {
+  height: 110px;
+  background: #fff;
+  border: 1px solid #b9b2a4;
+  color: var(--muted);
+  font-size: 11px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 4px;
+}
+.key.black {
+  height: 68px;
+  background: #2a2724;
+  border: 1px solid #000;
+  z-index: 2;
+}
+.key:active, .key:hover { filter: brightness(0.92); }
+.key.white.expected { background: #ffd978; border-color: var(--loop); }
+.key.black.expected { background: var(--loop); }

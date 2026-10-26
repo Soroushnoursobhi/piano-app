@@ -87,6 +87,15 @@ export function Controls({ player, onFile }: { player: Player; onFile: (f: File)
         ))}
       </div>
 
+      <button
+        className={player.waitMode ? "active" : ""}
+        disabled={!hasScore}
+        title="Playback waits for you to play each note on the keyboard below"
+        onClick={() => player.setWaitMode(!player.waitMode)}
+      >
+        {player.waitMode ? "Wait mode on" : "Wait mode off"}
+      </button>
+
       <div className="group">
         <span>Loop</span>
         <input

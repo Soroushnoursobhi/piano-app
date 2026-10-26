@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { usePlayer } from "./usePlayer";
 import { Controls } from "./Controls";
 import { ScoreView } from "./ScoreView";
+import { Keyboard } from "./Keyboard";
 import "./App.css";
 
 /*
@@ -44,6 +45,9 @@ export default function App() {
         {player.error && <p className="hint error">Could not read that file: {player.error}</p>}
         <ScoreView containerRef={scoreRef} player={player} empty={player.measureCount === 0} />
       </main>
+      <footer className="keys">
+        <Keyboard expected={player.expected} onNoteOn={player.noteOn} />
+      </footer>
     </div>
   );
 }
