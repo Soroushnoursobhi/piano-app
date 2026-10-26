@@ -1,0 +1,20 @@
+:root {
+  --bg: #f6f3ec;
+  --paper: #fffdf8;
+  --ink: #1f1d1a;
+  --muted: #6e675c;
+  --line: #d9d2c4;
+  --accent: #2c5f7a;
+  --accent-ink: #ffffff;
+  --loop: #c89a3c;
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  color: var(--ink);
+  background: var(--bg);
+}
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; height: 100%; }
+body { font-size: 16px; line-height: 1.4; }
+button, input, select {
+  font: inherit;
+  color: inherit;
+}
