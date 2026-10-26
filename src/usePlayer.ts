@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { OpenSheetMusicDisplay, type Note } from "opensheetmusicdisplay";
+import { OpenSheetMusicDisplay, type Note, type GraphicalNote } from "opensheetmusicdisplay";
 import * as Tone from "tone";
 
 /*
@@ -15,6 +15,7 @@ type PlayableNote = {
   midi: number;        // MIDI pitch number: 60 = middle C
   durationWhole: number; // length in whole notes (0.25 = a quarter note)
   staff: number;       // 0 = top staff (right hand), 1 = bottom staff (left hand)
+  note: Note;          // OSMD's own note object, needed to colour it on screen
 };
 
 export type Hands = "both" | "right" | "left";
@@ -33,6 +34,8 @@ export type Status = "empty" | "loading" | "ready" | "playing" | "paused";
 export type Loop = { start: number; end: number } | null; // 0-based measure indices, inclusive
 
 const PPQ = 192; // ticks per quarter note on the Tone transport
+const COLOR_PLAYING = "#d03a2a"; // notes at the cursor
+const COLOR_OWED = "#c89a3c";    // wait mode: notes still to be played
 const SAMPLE_BASE = "https://tonejs.github.io/audio/salamander/";
 const SAMPLE_URLS: Record<string, string> = {
   A0: "A0.mp3", C1: "C1.mp3", "D#1": "Ds1.mp3", "F#1": "Fs1.mp3",
@@ -63,6 +66,7 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
   const waitActiveRef = useRef(false);           // true while wait-mode playback is running
   const waitStepRef = useRef(0);                 // the step we are currently waiting on
   const expectedRef = useRef<Set<number>>(new Set()); // MIDI numbers still to be played
+  const paintedRef = useRef<GraphicalNote[]>([]);     // notes currently coloured, to undo
 
   // Things the UI shows live in state (changing them re-renders the components).
   const [status, setStatus] = useState<Status>("empty");
@@ -92,6 +96,28 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
     return h === "both" || (h === "right" ? n.staff === 0 : n.staff !== 0);
   };
 
+  // ---- colouring notes on the score ----
+  // Colour the notes of one step; pass null to clear. In wait mode, notes still
+  // owed are gold, everything else at the cursor is blue.
+  const paint = useCallback((stepIndex: number | null) => {
+    const osmd = osmdRef.current;
+    if (!osmd) return;
+    const base = osmd.EngravingRules.DefaultColorMusic || "#000000";
+    for (const g of paintedRef.current) g.setColor(base, {});
+    paintedRef.current = [];
+    if (stepIndex === null) return;
+    const step = stepsRef.current[stepIndex];
+    if (!step) return;
+    for (const n of step.notes) {
+      // GNote: source note -> the drawn note (undefined if not drawn, e.g. hidden staff)
+      const g = osmd.EngravingRules.GNote(n.note);
+      if (!g) continue;
+      const owed = waitActiveRef.current && expectedRef.current.has(n.midi) && isSelectedHand(n);
+      g.setColor(owed ? COLOR_OWED : COLOR_PLAYING, {});
+      paintedRef.current.push(g);
+    }
+  }, []);
+
   // ---- cursor helpers ----
   // Move the visual cursor to a given step. Forward = call next() repeatedly;
   // backward = reset to the start and walk forward again.
@@ -109,7 +135,8 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
     }
     const step = stepsRef.current[stepIndex];
     if (step) setCurrentMeasure(step.measureIndex);
-  }, []);
+    paint(stepIndex);
+  }, [paint]);
 
   // ---- extract steps by walking the score with OSMD's cursor ----
   const extractSteps = useCallback((osmd: OpenSheetMusicDisplay): Step[] => {
@@ -139,9 +166,9 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
           const tie = note.NoteTie;
           if (tie) {
             if (tie.StartNote !== note) continue; // continuation of a tie: already sounding
-            notes.push({ midi: note.halfTone + 12, durationWhole: tie.Duration.RealValue, staff });
+            notes.push({ midi: note.halfTone + 12, durationWhole: tie.Duration.RealValue, staff, note });
           } else {
-            notes.push({ midi: note.halfTone + 12, durationWhole: note.Length.RealValue, staff });
+            notes.push({ midi: note.halfTone + 12, durationWhole: note.Length.RealValue, staff, note });
           }
         }
       }
@@ -185,9 +212,10 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
         transport.stop();
         setStatus("ready");
         moveCursorTo(0);
+        paint(null);
       }, 0);
     }, `${endTicksRef.current}i`);
-  }, [moveCursorTo]);
+  }, [moveCursorTo, paint]);
 
   // ---- public: load a MusicXML string ----
   const load = useCallback(async (xml: string, fileName: string) => {
@@ -205,6 +233,7 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
     expectedRef.current = new Set();
     setExpected([]);
     try {
+      paintedRef.current = [];
       await osmd.load(xml);
       osmd.render();
       osmd.cursor.show();
@@ -273,6 +302,7 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
         setExpected([]);
         setStatus("ready");
         moveCursorTo(0);
+        paint(null);
         return;
       }
       const step = steps[i];
@@ -283,11 +313,12 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
         waitStepRef.current = i;
         expectedRef.current = new Set(wanted);
         setExpected([...new Set(wanted)]);
+        paint(i);
         return;
       }
       i++;
     }
-  }, [moveCursorTo, soundNotes]);
+  }, [moveCursorTo, soundNotes, paint]);
 
   // Called by any input device: on-screen keyboard now, MIDI keyboard later.
   const noteOn = useCallback(async (midi: number) => {
@@ -299,7 +330,8 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
     exp.delete(midi);
     setExpected([...exp]);
     if (exp.size === 0) enterStep(waitStepRef.current + 1);
-  }, [ensureAudio, enterStep]);
+    else paint(waitStepRef.current); // the note just played turns blue
+  }, [ensureAudio, enterStep, paint]);
 
   const play = useCallback(async () => {
     if (stepsRef.current.length === 0) return;
@@ -330,8 +362,9 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
     expectedRef.current = new Set();
     setExpected([]);
     moveCursorTo(0);
+    paint(null);
     setStatus(stepsRef.current.length ? "ready" : "empty");
-  }, [moveCursorTo]);
+  }, [moveCursorTo, paint]);
 
   const setWaitMode = useCallback((on: boolean) => {
     if (waitModeRef.current === on) return;
