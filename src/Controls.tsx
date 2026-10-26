@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { usePlayer } from "./usePlayer";
 
 type Player = ReturnType<typeof usePlayer>;
@@ -11,6 +11,18 @@ export function Controls({ player, onFile }: { player: Player; onFile: (f: File)
 
   const hasScore = player.measureCount > 0;
   const playing = player.status === "playing";
+
+  // Space = play/pause, unless you're typing in an input.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== "Space" || (e.target as HTMLElement).tagName === "INPUT") return;
+      e.preventDefault();
+      if (!hasScore) return;
+      if (playing) player.pause(); else player.play();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [hasScore, playing, player]);
 
   const toggleLoop = () => {
     if (player.loop) player.setLoop(null);
@@ -45,25 +57,30 @@ export function Controls({ player, onFile }: { player: Player; onFile: (f: File)
         </span>
       </div>
 
-      <label className="group">
-        Tempo
+      <div className="group">
+        <span>Tempo</span>
         <input
           type="range" min={30} max={240} value={player.bpm}
           disabled={!hasScore}
           onChange={(e) => player.setBpm(Number(e.target.value))}
         />
-        <span className="readout">{player.bpm} bpm</span>
-      </label>
+        <button
+          className="quiet readout"
+          disabled={!hasScore}
+          title="Reset to the score's tempo"
+          onClick={() => player.setBpm(player.sheetBpm)}
+        >
+          {player.bpm} bpm{hasScore && player.bpm !== player.sheetBpm ? ` (${Math.round((player.bpm / player.sheetBpm) * 100)}%)` : ""}
+        </button>
+      </div>
 
       <div className="group">
-        <label>
-          Loop
-          <input
-            type="number" min={1} max={player.measureCount || 1} value={loopStart}
-            disabled={!hasScore || !!player.loop}
-            onChange={(e) => setLoopStart(Number(e.target.value))}
-          />
-        </label>
+        <span>Loop</span>
+        <input
+          type="number" min={1} max={player.measureCount || 1} value={loopStart}
+          disabled={!hasScore || !!player.loop}
+          onChange={(e) => setLoopStart(Number(e.target.value))}
+        />
         <span>to</span>
         <input
           type="number" min={1} max={player.measureCount || 1} value={loopEnd}

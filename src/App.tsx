@@ -42,7 +42,7 @@ export default function App() {
           <p className="hint">Choose a .musicxml, .xml or .mxl file to begin.</p>
         )}
         {player.error && <p className="hint error">Could not read that file: {player.error}</p>}
-        <ScoreView containerRef={scoreRef} player={player} />
+        <ScoreView containerRef={scoreRef} player={player} empty={player.measureCount === 0} />
       </main>
     </div>
   );

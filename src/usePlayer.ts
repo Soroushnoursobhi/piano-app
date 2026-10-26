@@ -59,6 +59,7 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
   const [measureCount, setMeasureCount] = useState(0);
   const [currentMeasure, setCurrentMeasure] = useState(0);
   const [bpm, setBpmState] = useState(100);
+  const [sheetBpm, setSheetBpm] = useState(100);
   const [loop, setLoopState] = useState<Loop>(null);
   const [title, setTitle] = useState("");
   const [error, setError] = useState("");
@@ -178,18 +179,12 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
     setLoopState(null);
     transport.loop = false;
     try {
-      console.time("osmd.load");
       await osmd.load(xml);
-      console.timeEnd("osmd.load");
-      console.time("osmd.render");
       osmd.render();
-      console.timeEnd("osmd.render");
       osmd.cursor.show();
       cursorStepRef.current = 0;
 
-      console.time("extractSteps");
       const steps = extractSteps(osmd);
-      console.timeEnd("extractSteps");
       console.log(`${steps.length} steps, ${steps.reduce((n, s) => n + s.notes.length, 0)} notes`);
       stepsRef.current = steps;
 
@@ -201,13 +196,12 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
       const sheetBpm = osmd.Sheet.DefaultStartTempoInBpm || 100;
       transport.bpm.value = sheetBpm;
       setBpmState(Math.round(sheetBpm));
+      setSheetBpm(Math.round(sheetBpm));
 
       setMeasureCount(measures.length);
       setCurrentMeasure(0);
       setTitle(osmd.Sheet.TitleString || fileName);
-      console.time("scheduleAll");
       scheduleAll();
-      console.timeEnd("scheduleAll");
       setStatus("ready");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -306,7 +300,7 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
   }, []);
 
   return {
-    status, error, title, measureCount, currentMeasure, bpm, loop,
+    status, error, title, measureCount, currentMeasure, bpm, sheetBpm, loop,
     load, play, pause, stop, setBpm, setLoop, jumpToMeasure, measureAtPoint,
   };
 }
