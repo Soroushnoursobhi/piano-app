@@ -87,6 +87,15 @@ export function Controls({ player, onFile }: { player: Player; onFile: (f: File)
         ))}
       </div>
 
+      <div className="group">
+        <button className={player.metronome ? "active" : ""} disabled={!hasScore} onClick={() => player.setMetronome(!player.metronome)}>
+          Metronome
+        </button>
+        <button className={player.countIn ? "active" : ""} disabled={!hasScore} title="One bar of clicks before playback starts" onClick={() => player.setCountIn(!player.countIn)}>
+          Count-in
+        </button>
+      </div>
+
       <button
         className={player.waitMode ? "active" : ""}
         disabled={!hasScore}

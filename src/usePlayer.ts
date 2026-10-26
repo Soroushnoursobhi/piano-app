@@ -67,6 +67,11 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
   const waitStepRef = useRef(0);                 // the step we are currently waiting on
   const expectedRef = useRef<Set<number>>(new Set()); // MIDI numbers still to be played
   const paintedRef = useRef<GraphicalNote[]>([]);     // notes currently coloured, to undo
+  const clickRef = useRef<Tone.MembraneSynth | null>(null); // the metronome sound
+  const metronomeRef = useRef(false);
+  const countInRef = useRef(false);
+  const beatsPerBarRef = useRef(4);    // from the time signature, e.g. 3 for 3/4
+  const beatTicksRef = useRef(PPQ);    // transport ticks per beat (PPQ = one quarter note)
 
   // Things the UI shows live in state (changing them re-renders the components).
   const [status, setStatus] = useState<Status>("empty");
@@ -78,6 +83,8 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
   const [hands, setHandsState] = useState<Hands>("both");
   const [waitMode, setWaitModeState] = useState(false);
   const [expected, setExpected] = useState<number[]>([]); // for the on-screen keyboard
+  const [metronome, setMetronomeState] = useState(false);
+  const [countIn, setCountInState] = useState(false);
   const [title, setTitle] = useState("");
   const [error, setError] = useState("");
 
@@ -206,6 +213,15 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
         Tone.getDraw().schedule(() => moveCursorTo(step.index), time);
       }, `${wholeToTicks(step.timeWhole)}i`);
     }
+    // Metronome: one click per beat, accented on the first beat of a bar.
+    // It is scheduled always, and the callback checks the switch, so turning
+    // it on or off while playing needs no rescheduling.
+    transport.scheduleRepeat((time) => {
+      if (!metronomeRef.current || !clickRef.current) return;
+      const ticks = transport.getTicksAtTime(time);
+      const beatInBar = Math.round(ticks / beatTicksRef.current) % beatsPerBarRef.current;
+      clickRef.current.triggerAttackRelease(beatInBar === 0 ? "C5" : "G4", 0.05, time, beatInBar === 0 ? 1 : 0.6);
+    }, `${beatTicksRef.current}i`, 0);
     // Stop at the end of the piece.
     transport.schedule(() => {
       Tone.getDraw().schedule(() => {
@@ -248,6 +264,11 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
       const last = measures[measures.length - 1];
       endTicksRef.current = wholeToTicks(last.AbsoluteTimestamp.RealValue + last.Duration.RealValue);
 
+      // Time signature of the first measure: 3/4 -> 3 beats per bar, a beat is a quarter.
+      const ts = measures[0].ActiveTimeSignature;
+      beatsPerBarRef.current = ts?.Numerator || 4;
+      beatTicksRef.current = Math.round((PPQ * 4) / (ts?.Denominator || 4));
+
       const sheetBpm = osmd.Sheet.DefaultStartTempoInBpm || 100;
       transport.bpm.value = sheetBpm;
       setBpmState(Math.round(sheetBpm));
@@ -270,6 +291,10 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
     if (samplerRef.current) return;
     const sampler = new Tone.Sampler({ urls: SAMPLE_URLS, baseUrl: SAMPLE_BASE, release: 1 }).toDestination();
     samplerRef.current = sampler;
+    clickRef.current = new Tone.MembraneSynth({
+      pitchDecay: 0.01, octaves: 2, envelope: { attack: 0.001, decay: 0.08, sustain: 0, release: 0.02 },
+    }).toDestination();
+    clickRef.current.volume.value = -6;
     await Tone.loaded(); // waits for every sample file to download
   }, []);
 
@@ -340,10 +365,25 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
     if (waitModeRef.current) {
       waitActiveRef.current = true;
       enterStep(cursorStepRef.current);
+      return;
+    }
+    const transport = Tone.getTransport();
+    if (countInRef.current && clickRef.current && transport.state !== "started") {
+      // One bar of clicks, then the transport starts exactly on the next beat.
+      const beatSec = (60 / transport.bpm.value) * (4 * (beatTicksRef.current / PPQ)) / 4;
+      const now = Tone.now() + 0.05;
+      const beats = beatsPerBarRef.current;
+      for (let b = 0; b < beats; b++) {
+        clickRef.current.triggerAttackRelease(b === 0 ? "C5" : "G4", 0.05, now + b * beatSec, b === 0 ? 1 : 0.6);
+      }
+      transport.start(now + beats * beatSec);
     } else {
-      Tone.getTransport().start();
+      transport.start();
     }
   }, [ensureAudio, enterStep]);
+
+  const setMetronome = useCallback((on: boolean) => { metronomeRef.current = on; setMetronomeState(on); }, []);
+  const setCountIn = useCallback((on: boolean) => { countInRef.current = on; setCountInState(on); }, []);
 
   const pause = useCallback(() => {
     Tone.getTransport().pause();
@@ -443,7 +483,7 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
   }, []);
 
   return {
-    status, error, title, measureCount, currentMeasure, bpm, sheetBpm, loop, hands, waitMode, expected,
-    load, play, pause, stop, setBpm, setLoop, setHands, setWaitMode, noteOn, jumpToMeasure, measureAtPoint,
+    status, error, title, measureCount, currentMeasure, bpm, sheetBpm, loop, hands, waitMode, expected, metronome, countIn,
+    load, play, pause, stop, setBpm, setLoop, setHands, setWaitMode, setMetronome, setCountIn, noteOn, jumpToMeasure, measureAtPoint,
   };
 }
