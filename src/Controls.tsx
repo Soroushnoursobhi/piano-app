@@ -1,9 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import type { usePlayer } from "./usePlayer";
+import type { ScoreEntry } from "./library";
 
 type Player = ReturnType<typeof usePlayer>;
 
-export function Controls({ player, onFile }: { player: Player; onFile: (f: File) => void }) {
+type Props = {
+  player: Player;
+  onFile: (f: File) => void;
+  scores: ScoreEntry[];
+  currentId: string | null;
+  onPick: (id: string) => void;
+  onRemove: () => void;
+};
+
+export function Controls({ player, onFile, scores, currentId, onPick, onRemove }: Props) {
   const fileInput = useRef<HTMLInputElement | null>(null);
   // Loop inputs are 1-based for humans; the player uses 0-based indices.
   const [loopStart, setLoopStart] = useState(1);
@@ -11,6 +21,11 @@ export function Controls({ player, onFile }: { player: Player; onFile: (f: File)
 
   const hasScore = player.measureCount > 0;
   const playing = player.status === "playing";
+
+  // Keep the loop inputs in step with a loop restored from the library.
+  useEffect(() => {
+    if (player.loop) { setLoopStart(player.loop.start + 1); setLoopEnd(player.loop.end + 1); }
+  }, [player.loop]);
 
   // Space = play/pause, unless you're typing in an input.
   useEffect(() => {
@@ -44,7 +59,20 @@ export function Controls({ player, onFile }: { player: Player; onFile: (f: File)
             e.target.value = "";
           }}
         />
-        <span className="title">{player.title || "No score"}</span>
+        {scores.length > 0 && (
+          <select
+            className="library"
+            value={currentId ?? ""}
+            onChange={(e) => e.target.value && onPick(e.target.value)}
+            title="Your scores"
+          >
+            {currentId === null && <option value="">Choose a score…</option>}
+            {scores.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        )}
+        {currentId && (
+          <button className="quiet" title="Remove this score from the list" onClick={onRemove}>✕</button>
+        )}
       </div>
 
       <div className="group">

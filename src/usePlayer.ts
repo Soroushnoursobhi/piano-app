@@ -24,8 +24,10 @@ export type Hands = "both" | "right" | "left";
 // where something starts (a note, a chord, a rest) in any staff.
 type Step = {
   index: number;       // how many cursor.next() calls from the start
-  timeWhole: number;   // start time in whole notes from the beginning
+  timeWhole: number;   // PLAYBACK time in whole notes. Keeps counting through
+                       // repeats, so a bar played twice gets two different times.
   measureIndex: number; // 0-based measure
+  srcWhole: number;    // written position (whole notes), for bar arithmetic
   notes: PlayableNote[];
 };
 
@@ -149,10 +151,18 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
   const extractSteps = useCallback((osmd: OpenSheetMusicDisplay): Step[] => {
     const steps: Step[] = [];
     const cursor = osmd.cursor;
+    const measures = osmd.Sheet.SourceMeasures;
+    const mStart = (m: number) => measures[m].AbsoluteTimestamp.RealValue;
+    const mEnd = (m: number) => mStart(m) + measures[m].Duration.RealValue;
     cursor.reset();
     let index = 0;
     let lastKey = "";
     let stuck = 0;
+    // Running playback clock. The cursor follows repeat signs, so the written
+    // position (CurrentSourceTimestamp) can jump backwards; this never does.
+    let clock = 0;
+    let prevTs = -1;
+    let prevMeasure = -1;
     while (!cursor.iterator.EndReached) {
       const it = cursor.iterator;
       // Safety: OSMD's iterator can get stuck on some repeat structures.
@@ -179,12 +189,16 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
           }
         }
       }
-      steps.push({
-        index,
-        timeWhole: it.CurrentSourceTimestamp.RealValue,
-        measureIndex: it.CurrentMeasureIndex,
-        notes,
-      });
+      const ts = it.CurrentSourceTimestamp.RealValue;
+      const m = it.CurrentMeasureIndex;
+      if (prevTs >= 0) {
+        // Same bar: advance by the written distance. Different bar (next bar,
+        // or a jump from a repeat): finish the old bar, then enter the new one.
+        clock += m === prevMeasure ? ts - prevTs : (mEnd(prevMeasure) - prevTs) + (ts - mStart(m));
+      }
+      prevTs = ts;
+      prevMeasure = m;
+      steps.push({ index, timeWhole: clock, measureIndex: m, srcWhole: ts, notes });
       cursor.next();
       index++;
     }
@@ -257,12 +271,16 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
 
       const steps = extractSteps(osmd);
       console.log(`${steps.length} steps, ${steps.reduce((n, s) => n + s.notes.length, 0)} notes`);
+      console.log("bar order:", steps.map((s) => s.measureIndex + 1).filter((m, i, a) => m !== a[i - 1]).join(" "));
       stepsRef.current = steps;
 
       const measures = osmd.Sheet.SourceMeasures;
       measureStartsRef.current = measures.map((m) => m.AbsoluteTimestamp.RealValue);
-      const last = measures[measures.length - 1];
-      endTicksRef.current = wholeToTicks(last.AbsoluteTimestamp.RealValue + last.Duration.RealValue);
+      // End of playback: the last step, plus whatever is left of its bar.
+      const lastStep = steps[steps.length - 1];
+      const lastM = measures[lastStep.measureIndex];
+      const barEnd = lastM.AbsoluteTimestamp.RealValue + lastM.Duration.RealValue;
+      endTicksRef.current = wholeToTicks(lastStep.timeWhole + (barEnd - lastStep.srcWhole));
 
       // Time signature of the first measure: 3/4 -> 3 beats per bar, a beat is a quarter.
       const ts = measures[0].ActiveTimeSignature;
@@ -447,8 +465,12 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
     }
     const start = Math.max(0, Math.min(range.start, range.end));
     const end = Math.min(starts.length - 1, Math.max(range.start, range.end));
-    const startTicks = wholeToTicks(starts[start]);
-    const endTicks = end + 1 < starts.length ? wholeToTicks(starts[end + 1]) : endTicksRef.current;
+    // Loop boundaries in playback time: the first pass through those bars.
+    const steps = stepsRef.current;
+    const startStep = steps.find((s) => s.measureIndex >= start);
+    const exitStep = steps.find((s) => s.measureIndex > end && startStep && s.index > startStep.index);
+    const startTicks = startStep ? wholeToTicks(startStep.timeWhole) : 0;
+    const endTicks = exitStep ? wholeToTicks(exitStep.timeWhole) : endTicksRef.current;
     transport.loopStart = `${startTicks}i`;
     transport.loopEnd = `${endTicks}i`;
     transport.loop = true;
@@ -458,6 +480,18 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
     const posTicks = transport.ticks;
     if (posTicks < startTicks || posTicks >= endTicks) jumpToMeasure(start);
   }, [jumpToMeasure]);
+
+  // Restore a saved set of settings (called by the library after a score loads).
+  const applySettings = useCallback((s: {
+    bpm?: number; hands?: Hands; loop?: Loop; metronome?: boolean; countIn?: boolean; waitMode?: boolean;
+  }) => {
+    if (s.bpm) setBpm(s.bpm);
+    if (s.hands) setHands(s.hands);
+    if (s.metronome !== undefined) setMetronome(s.metronome);
+    if (s.countIn !== undefined) setCountIn(s.countIn);
+    if (s.waitMode !== undefined) setWaitMode(s.waitMode);
+    setLoop(s.loop ?? null);
+  }, [setBpm, setHands, setMetronome, setCountIn, setWaitMode, setLoop]);
 
   // Given a click position in CSS pixels relative to the score's SVG,
   // find which measure was clicked.
@@ -485,5 +519,6 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
   return {
     status, error, title, measureCount, currentMeasure, bpm, sheetBpm, loop, hands, waitMode, expected, metronome, countIn,
     load, play, pause, stop, setBpm, setLoop, setHands, setWaitMode, setMetronome, setCountIn, noteOn, jumpToMeasure, measureAtPoint,
+    applySettings,
   };
 }
