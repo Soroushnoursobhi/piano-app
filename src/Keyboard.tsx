@@ -9,7 +9,13 @@ const WHITE_W = 26;
 const NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const isBlack = (midi: number) => NAMES[midi % 12].includes("#");
 
-export function Keyboard({ expected, onNoteOn }: { expected: number[]; onNoteOn: (midi: number) => void }) {
+type Props = {
+  expected: number[]; // wait mode: keys still to be played (gold)
+  playing: number[];  // keys sounding right now (red)
+  onNoteOn: (midi: number) => void;
+};
+
+export function Keyboard({ expected, playing, onNoteOn }: Props) {
   const keys: { midi: number; black: boolean; x: number }[] = [];
   let whiteIndex = 0;
   for (let midi = LOW; midi <= HIGH; midi++) {
@@ -21,13 +27,16 @@ export function Keyboard({ expected, onNoteOn }: { expected: number[]; onNoteOn:
   }
   const width = whiteIndex * WHITE_W;
   const want = new Set(expected);
+  const lit = new Set(playing);
+  const cls = (k: { midi: number; black: boolean }) =>
+    "key " + (k.black ? "black" : "white") + (want.has(k.midi) ? " expected" : lit.has(k.midi) ? " playing" : "");
 
   return (
     <div className="keyboard" style={{ width }}>
       {keys.filter((k) => !k.black).map((k) => (
         <button
           key={k.midi}
-          className={"key white" + (want.has(k.midi) ? " expected" : "")}
+          className={cls(k)}
           style={{ left: k.x, width: WHITE_W }}
           onPointerDown={() => onNoteOn(k.midi)}
           aria-label={NAMES[k.midi % 12] + (Math.floor(k.midi / 12) - 1)}
@@ -38,7 +47,7 @@ export function Keyboard({ expected, onNoteOn }: { expected: number[]; onNoteOn:
       {keys.filter((k) => k.black).map((k) => (
         <button
           key={k.midi}
-          className={"key black" + (want.has(k.midi) ? " expected" : "")}
+          className={cls(k)}
           style={{ left: k.x, width: WHITE_W * 0.6 }}
           onPointerDown={() => onNoteOn(k.midi)}
           aria-label={NAMES[k.midi % 12] + (Math.floor(k.midi / 12) - 1)}

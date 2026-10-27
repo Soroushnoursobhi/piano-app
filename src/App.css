@@ -161,3 +161,5 @@ input[type="range"] { width: 140px; accent-color: var(--accent); }
 .key:active, .key:hover { filter: brightness(0.92); }
 .key.white.expected { background: #ffd978; border-color: var(--loop); }
 .key.black.expected { background: var(--loop); }
+.key.white.playing { background: #f2a79d; border-color: #d03a2a; }
+.key.black.playing { background: #d03a2a; }

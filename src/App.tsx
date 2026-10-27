@@ -100,7 +100,7 @@ export default function App() {
         <ScoreView containerRef={scoreRef} player={player} empty={player.measureCount === 0} />
       </main>
       <footer className="keys">
-        <Keyboard expected={player.expected} onNoteOn={player.noteOn} />
+        <Keyboard expected={player.expected} playing={player.sounding} onNoteOn={player.noteOn} />
       </footer>
     </div>
   );

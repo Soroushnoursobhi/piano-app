@@ -85,6 +85,7 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
   const [hands, setHandsState] = useState<Hands>("both");
   const [waitMode, setWaitModeState] = useState(false);
   const [expected, setExpected] = useState<number[]>([]); // for the on-screen keyboard
+  const [sounding, setSounding] = useState<number[]>([]); // keys lit on the keyboard
   const [metronome, setMetronomeState] = useState(false);
   const [countIn, setCountInState] = useState(false);
   const [title, setTitle] = useState("");
@@ -114,9 +115,10 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
     const base = osmd.EngravingRules.DefaultColorMusic || "#000000";
     for (const g of paintedRef.current) g.setColor(base, {});
     paintedRef.current = [];
-    if (stepIndex === null) return;
+    if (stepIndex === null) { setSounding([]); return; }
     const step = stepsRef.current[stepIndex];
     if (!step) return;
+    const lit: number[] = [];
     for (const n of step.notes) {
       // GNote: source note -> the drawn note (undefined if not drawn, e.g. hidden staff)
       const g = osmd.EngravingRules.GNote(n.note);
@@ -124,7 +126,11 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
       const owed = waitActiveRef.current && expectedRef.current.has(n.midi) && isSelectedHand(n);
       g.setColor(owed ? COLOR_OWED : COLOR_PLAYING, {});
       paintedRef.current.push(g);
+      // Keyboard: light every key that sounds now (muted hand keys stay dark;
+      // in wait mode the owed keys are shown gold by the keyboard itself).
+      if (!owed && (waitActiveRef.current || isSelectedHand(n))) lit.push(n.midi);
     }
+    setSounding(lit);
   }, []);
 
   // ---- cursor helpers ----
@@ -409,6 +415,7 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
     waitActiveRef.current = false;
     expectedRef.current = new Set();
     setExpected([]);
+    setSounding([]);
     setStatus("paused");
   }, []);
 
@@ -517,7 +524,7 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
   }, []);
 
   return {
-    status, error, title, measureCount, currentMeasure, bpm, sheetBpm, loop, hands, waitMode, expected, metronome, countIn,
+    status, error, title, measureCount, currentMeasure, bpm, sheetBpm, loop, hands, waitMode, expected, sounding, metronome, countIn,
     load, play, pause, stop, setBpm, setLoop, setHands, setWaitMode, setMetronome, setCountIn, noteOn, jumpToMeasure, measureAtPoint,
     applySettings,
   };
