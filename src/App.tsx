@@ -77,11 +77,11 @@ export default function App() {
 
   // Whenever a setting changes, save it for the current score.
   // The dependency list is what React watches; the effect runs when any of them changes.
-  const { bpm, hands, loop, metronome, countIn, waitMode, measureCount } = player;
+  const { bpm, hands, loop, metronome, countIn, waitMode, measureCount, drumStyle, drumVolume, pianoMuted } = player;
   useEffect(() => {
     if (!currentId || measureCount === 0) return;
-    lib.saveSettings(currentId, { bpm, hands, loop, metronome, countIn, waitMode });
-  }, [currentId, measureCount, bpm, hands, loop, metronome, countIn, waitMode]);
+    lib.saveSettings(currentId, { bpm, hands, loop, metronome, countIn, waitMode, drumStyle, drumVolume, pianoMuted });
+  }, [currentId, measureCount, bpm, hands, loop, metronome, countIn, waitMode, drumStyle, drumVolume, pianoMuted]);
 
   return (
     <div className="app">

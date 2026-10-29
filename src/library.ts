@@ -6,6 +6,7 @@
 */
 import { get, set, del, createStore } from "idb-keyval";
 import type { Hands, Loop } from "./usePlayer";
+import type { DrumStyle } from "./drums";
 
 export type ScoreSettings = {
   bpm?: number;
@@ -14,6 +15,9 @@ export type ScoreSettings = {
   metronome?: boolean;
   countIn?: boolean;
   waitMode?: boolean;
+  drumStyle?: DrumStyle;
+  drumVolume?: number;
+  pianoMuted?: boolean;
 };
 
 export type ScoreEntry = {

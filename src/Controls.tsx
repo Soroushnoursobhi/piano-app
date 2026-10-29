@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { usePlayer } from "./usePlayer";
 import type { ScoreEntry } from "./library";
 import type { useMidi } from "./useMidi";
+import { DRUM_STYLES, type DrumStyle } from "./drums";
 
 type Player = ReturnType<typeof usePlayer>;
 
@@ -123,6 +124,33 @@ export function Controls({ player, onFile, scores, currentId, onPick, onRemove, 
         </button>
         <button className={player.countIn ? "active" : ""} disabled={!hasScore} title="One bar of clicks before playback starts" onClick={() => player.setCountIn(!player.countIn)}>
           Count-in
+        </button>
+      </div>
+
+      <div className="group">
+        <select
+          className="library"
+          value={player.drumStyle}
+          disabled={!hasScore}
+          title="Drum backing"
+          onChange={(e) => player.setDrumStyle(e.target.value as DrumStyle)}
+        >
+          {DRUM_STYLES.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+        </select>
+        <input
+          type="range" min={0} max={100} value={player.drumVolume}
+          disabled={!hasScore || player.drumStyle === "off"}
+          title="Drum volume"
+          style={{ width: 80 }}
+          onChange={(e) => player.setDrumVolume(Number(e.target.value))}
+        />
+        <button
+          className={player.pianoMuted ? "active" : ""}
+          disabled={!hasScore}
+          title="Silence the score's piano: cursor and drums only, you play the notes"
+          onClick={() => player.setPianoMuted(!player.pianoMuted)}
+        >
+          {player.pianoMuted ? "Piano muted" : "Mute piano"}
         </button>
       </div>
 

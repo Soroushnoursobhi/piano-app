@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { OpenSheetMusicDisplay, type Note, type GraphicalNote } from "opensheetmusicdisplay";
 import * as Tone from "tone";
+import { createKit, getPattern, type DrumStyle, type Kit } from "./drums";
 
 /*
   This hook owns everything that is not pure UI:
@@ -50,6 +51,9 @@ const SAMPLE_URLS: Record<string, string> = {
   A7: "A7.mp3", C8: "C8.mp3",
 };
 
+// 0..100 slider -> decibels (0 = silent, 100 = 0 dB)
+const volumeDb = (v: number) => (v <= 0 ? -Infinity : 20 * Math.log10(v / 100) + 6);
+
 // whole notes -> transport ticks (a quarter note is PPQ ticks)
 const wholeToTicks = (whole: number) => Math.round(whole * 4 * PPQ);
 
@@ -74,6 +78,12 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
   const countInRef = useRef(false);
   const beatsPerBarRef = useRef(4);    // from the time signature, e.g. 3 for 3/4
   const beatTicksRef = useRef(PPQ);    // transport ticks per beat (PPQ = one quarter note)
+  const meterRef = useRef({ numerator: 4, denominator: 4 });
+  // Drums / band practice
+  const kitRef = useRef<Kit | null>(null);
+  const drumStyleRef = useRef<DrumStyle>("off");
+  const pianoMutedRef = useRef(false);
+  const drumVolumeRef = useRef(70);
 
   // Things the UI shows live in state (changing them re-renders the components).
   const [status, setStatus] = useState<Status>("empty");
@@ -88,6 +98,9 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
   const [sounding, setSounding] = useState<number[]>([]); // keys lit on the keyboard
   const [metronome, setMetronomeState] = useState(false);
   const [countIn, setCountInState] = useState(false);
+  const [drumStyle, setDrumStyleState] = useState<DrumStyle>("off");
+  const [drumVolume, setDrumVolumeState] = useState(70); // 0..100
+  const [pianoMuted, setPianoMutedState] = useState(false);
   const [title, setTitle] = useState("");
   const [error, setError] = useState("");
 
@@ -221,7 +234,7 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
         // Sound: durations are converted to seconds *now*, so a tempo change
         // made before this note is respected.
         const sampler = samplerRef.current;
-        if (sampler && step.notes.length) {
+        if (sampler && step.notes.length && !pianoMutedRef.current) {
           const secPerWhole = (60 / Tone.getTransport().bpm.value) * 4;
           for (const n of step.notes) {
             if (!isSelectedHand(n)) continue;
@@ -242,6 +255,22 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
       const beatInBar = Math.round(ticks / beatTicksRef.current) % beatsPerBarRef.current;
       clickRef.current.triggerAttackRelease(beatInBar === 0 ? "C5" : "G4", 0.05, time, beatInBar === 0 ? 1 : 0.6);
     }, `${beatTicksRef.current}i`, 0);
+    // Drums: once per bar, place every hit of the pattern inside that bar.
+    // Like the metronome, always scheduled; the callback checks the switch.
+    const barTicks = beatTicksRef.current * beatsPerBarRef.current;
+    transport.scheduleRepeat((time) => {
+      const kit = kitRef.current;
+      const { numerator, denominator } = meterRef.current;
+      const pattern = getPattern(drumStyleRef.current, numerator, denominator);
+      if (!kit || !pattern) return;
+      const stepSeconds = Tone.Time(`${beatTicksRef.current / pattern.grid}i`).toSeconds();
+      for (const [voice, steps] of Object.entries(pattern.hits)) {
+        for (const st of steps ?? []) {
+          if (st * stepSeconds >= Tone.Time(`${barTicks}i`).toSeconds()) continue; // short bars (2/4)
+          kit.play(voice as keyof typeof pattern.hits, time + st * stepSeconds, st % pattern.grid === 0 ? 1 : 0.7);
+        }
+      }
+    }, `${barTicks}i`, 0);
     // Stop at the end of the piece.
     transport.schedule(() => {
       Tone.getDraw().schedule(() => {
@@ -292,6 +321,7 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
       const ts = measures[0].ActiveTimeSignature;
       beatsPerBarRef.current = ts?.Numerator || 4;
       beatTicksRef.current = Math.round((PPQ * 4) / (ts?.Denominator || 4));
+      meterRef.current = { numerator: ts?.Numerator || 4, denominator: ts?.Denominator || 4 };
 
       const sheetBpm = osmd.Sheet.DefaultStartTempoInBpm || 100;
       transport.bpm.value = sheetBpm;
@@ -319,6 +349,8 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
       pitchDecay: 0.01, octaves: 2, envelope: { attack: 0.001, decay: 0.08, sustain: 0, release: 0.02 },
     }).toDestination();
     clickRef.current.volume.value = -6;
+    kitRef.current = createKit();
+    kitRef.current.volume.volume.value = volumeDb(drumVolumeRef.current);
     await Tone.loaded(); // waits for every sample file to download
   }, []);
 
@@ -399,7 +431,8 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
       const now = Tone.now() + 0.05;
       const beats = beatsPerBarRef.current;
       for (let b = 0; b < beats; b++) {
-        clickRef.current.triggerAttackRelease(b === 0 ? "C5" : "G4", 0.05, now + b * beatSec, b === 0 ? 1 : 0.6);
+        if (drumStyleRef.current !== "off" && kitRef.current) kitRef.current.play("hihat", now + b * beatSec, b === 0 ? 1 : 0.7);
+        else clickRef.current.triggerAttackRelease(b === 0 ? "C5" : "G4", 0.05, now + b * beatSec, b === 0 ? 1 : 0.6);
       }
       transport.start(now + beats * beatSec);
     } else {
@@ -408,6 +441,13 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
   }, [ensureAudio, enterStep]);
 
   const setMetronome = useCallback((on: boolean) => { metronomeRef.current = on; setMetronomeState(on); }, []);
+  const setDrumStyle = useCallback((v: DrumStyle) => { drumStyleRef.current = v; setDrumStyleState(v); }, []);
+  const setDrumVolume = useCallback((v: number) => {
+    drumVolumeRef.current = v;
+    setDrumVolumeState(v);
+    if (kitRef.current) kitRef.current.volume.volume.value = volumeDb(v);
+  }, []);
+  const setPianoMuted = useCallback((on: boolean) => { pianoMutedRef.current = on; setPianoMutedState(on); }, []);
   const setCountIn = useCallback((on: boolean) => { countInRef.current = on; setCountInState(on); }, []);
 
   const pause = useCallback(() => {
@@ -492,14 +532,18 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
   // Restore a saved set of settings (called by the library after a score loads).
   const applySettings = useCallback((s: {
     bpm?: number; hands?: Hands; loop?: Loop; metronome?: boolean; countIn?: boolean; waitMode?: boolean;
+    drumStyle?: DrumStyle; drumVolume?: number; pianoMuted?: boolean;
   }) => {
+    if (s.drumStyle) setDrumStyle(s.drumStyle);
+    if (s.drumVolume !== undefined) setDrumVolume(s.drumVolume);
+    if (s.pianoMuted !== undefined) setPianoMuted(s.pianoMuted);
     if (s.bpm) setBpm(s.bpm);
     if (s.hands) setHands(s.hands);
     if (s.metronome !== undefined) setMetronome(s.metronome);
     if (s.countIn !== undefined) setCountIn(s.countIn);
     if (s.waitMode !== undefined) setWaitMode(s.waitMode);
     setLoop(s.loop ?? null);
-  }, [setBpm, setHands, setMetronome, setCountIn, setWaitMode, setLoop]);
+  }, [setBpm, setHands, setMetronome, setCountIn, setWaitMode, setLoop, setDrumStyle, setDrumVolume, setPianoMuted]);
 
   // Given a click position in CSS pixels relative to the score's SVG,
   // find which measure was clicked.
@@ -526,7 +570,9 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
 
   return {
     status, error, title, measureCount, currentMeasure, bpm, sheetBpm, loop, hands, waitMode, expected, sounding, metronome, countIn,
+    drumStyle, drumVolume, pianoMuted,
     load, play, pause, stop, setBpm, setLoop, setHands, setWaitMode, setMetronome, setCountIn, noteOn, jumpToMeasure, measureAtPoint,
+    setDrumStyle, setDrumVolume, setPianoMuted,
     applySettings,
   };
 }
