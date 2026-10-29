@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { usePlayer } from "./usePlayer";
 import type { ScoreEntry } from "./library";
+import type { useMidi } from "./useMidi";
 
 type Player = ReturnType<typeof usePlayer>;
 
@@ -11,9 +12,10 @@ type Props = {
   currentId: string | null;
   onPick: (id: string) => void;
   onRemove: () => void;
+  midi: ReturnType<typeof useMidi>;
 };
 
-export function Controls({ player, onFile, scores, currentId, onPick, onRemove }: Props) {
+export function Controls({ player, onFile, scores, currentId, onPick, onRemove, midi }: Props) {
   const fileInput = useRef<HTMLInputElement | null>(null);
   // Loop inputs are 1-based for humans; the player uses 0-based indices.
   const [loopStart, setLoopStart] = useState(1);
@@ -122,6 +124,17 @@ export function Controls({ player, onFile, scores, currentId, onPick, onRemove }
         <button className={player.countIn ? "active" : ""} disabled={!hasScore} title="One bar of clicks before playback starts" onClick={() => player.setCountIn(!player.countIn)}>
           Count-in
         </button>
+      </div>
+
+      <div className="group">
+        {midi.device ? (
+          <span className="readout midi-ok" title="MIDI input connected">● {midi.device}</span>
+        ) : (
+          <button onClick={midi.connect} title={midi.error ?? "Connect a MIDI keyboard (Chrome)"}>
+            Connect piano
+          </button>
+        )}
+        {midi.error && <span className="readout error">{midi.error}</span>}
       </div>
 
       <button

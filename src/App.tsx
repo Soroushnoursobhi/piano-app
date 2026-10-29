@@ -3,6 +3,7 @@ import { usePlayer } from "./usePlayer";
 import { Controls } from "./Controls";
 import { ScoreView } from "./ScoreView";
 import { Keyboard } from "./Keyboard";
+import { useMidi } from "./useMidi";
 import * as lib from "./library";
 import "./App.css";
 
@@ -24,6 +25,8 @@ export default function App() {
   // Here it holds the <div> that OSMD draws into.
   const scoreRef = useRef<HTMLDivElement | null>(null);
   const player = usePlayer(scoreRef);
+  // Real piano: same entry point as the on-screen keyboard, minus the app's own sound.
+  const midi = useMidi((note) => player.noteOn(note, false));
 
   // ---- library ----
   const [scores, setScores] = useState<lib.ScoreEntry[]>([]);
@@ -90,6 +93,7 @@ export default function App() {
           currentId={currentId}
           onPick={(id) => { const e = scores.find((s) => s.id === id); if (e) openEntry(e); }}
           onRemove={onRemove}
+          midi={midi}
         />
       </header>
       <main className="stage">

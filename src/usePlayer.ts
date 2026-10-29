@@ -370,9 +370,10 @@ export function usePlayer(containerRef: React.RefObject<HTMLDivElement | null>) 
   }, [moveCursorTo, soundNotes, paint]);
 
   // Called by any input device: on-screen keyboard now, MIDI keyboard later.
-  const noteOn = useCallback(async (midi: number) => {
+  // `sound` false = the note came from a real piano that already made the sound.
+  const noteOn = useCallback(async (midi: number, sound = true) => {
     await ensureAudio();
-    samplerRef.current?.triggerAttackRelease(Tone.Frequency(midi, "midi").toNote(), 0.8);
+    if (sound) samplerRef.current?.triggerAttackRelease(Tone.Frequency(midi, "midi").toNote(), 0.8);
     if (!waitActiveRef.current) return;
     const exp = expectedRef.current;
     if (!exp.has(midi)) return; // wrong note: ignored
